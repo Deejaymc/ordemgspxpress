@@ -1,19 +1,7 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Users, Package, FileText, Wrench, TrendingUp, Clock } from "lucide-react";
-
-const stats = [
-  { label: "Clientes", value: "124", icon: Users, color: "text-primary" },
-  { label: "Ordens Abertas", value: "18", icon: FileText, color: "text-warning" },
-  { label: "Produtos", value: "56", icon: Package, color: "text-success" },
-  { label: "Técnicos", value: "8", icon: Wrench, color: "text-accent" },
-];
-
-const recentOrders = [
-  { id: "OS-001", client: "João Silva", status: "Em andamento", date: "2026-02-25", tech: "Carlos Mendes" },
-  { id: "OS-002", client: "Maria Santos", status: "Concluída", date: "2026-02-24", tech: "Ana Costa" },
-  { id: "OS-003", client: "Pedro Oliveira", status: "Pendente", date: "2026-02-24", tech: "Bruno Lima" },
-  { id: "OS-004", client: "Lucia Ferreira", status: "Em andamento", date: "2026-02-23", tech: "Carlos Mendes" },
-];
+import { Users, Package, FileText, Wrench, Clock } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 const statusColor: Record<string, string> = {
   "Pendente": "bg-warning/20 text-warning",
@@ -22,6 +10,41 @@ const statusColor: Record<string, string> = {
 };
 
 const Dashboard = () => {
+  const [stats, setStats] = useState({ clients: 0, orders: 0, products: 0, technicians: 0 });
+  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const [c, o, p, t] = await Promise.all([
+        supabase.from("clients").select("id", { count: "exact", head: true }),
+        supabase.from("service_orders").select("id", { count: "exact", head: true }),
+        supabase.from("products").select("id", { count: "exact", head: true }),
+        supabase.from("technicians").select("id", { count: "exact", head: true }),
+      ]);
+      setStats({
+        clients: c.count || 0,
+        orders: o.count || 0,
+        products: p.count || 0,
+        technicians: t.count || 0,
+      });
+
+      const { data } = await supabase
+        .from("service_orders")
+        .select("*, clients(nome), technicians(nome)")
+        .order("created_at", { ascending: false })
+        .limit(5);
+      setRecentOrders(data || []);
+    };
+    fetchData();
+  }, []);
+
+  const statCards = [
+    { label: "Clientes", value: stats.clients, icon: Users, color: "text-primary" },
+    { label: "Ordens Abertas", value: stats.orders, icon: FileText, color: "text-warning" },
+    { label: "Produtos", value: stats.products, icon: Package, color: "text-success" },
+    { label: "Técnicos", value: stats.technicians, icon: Wrench, color: "text-accent" },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
@@ -29,19 +52,10 @@ const Dashboard = () => {
         <p className="text-sm text-muted-foreground mt-1">Visão geral do sistema</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat, i) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className="glass rounded-xl p-5 flex items-center gap-4"
-          >
-            <div className={`p-3 rounded-lg bg-secondary ${stat.color}`}>
-              <stat.icon className="h-6 w-6" />
-            </div>
+        {statCards.map((stat, i) => (
+          <motion.div key={stat.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} className="glass rounded-xl p-5 flex items-center gap-4">
+            <div className={`p-3 rounded-lg bg-secondary ${stat.color}`}><stat.icon className="h-6 w-6" /></div>
             <div>
               <p className="text-2xl font-bold text-foreground">{stat.value}</p>
               <p className="text-sm text-muted-foreground">{stat.label}</p>
@@ -50,13 +64,7 @@ const Dashboard = () => {
         ))}
       </div>
 
-      {/* Recent orders */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-        className="glass rounded-xl overflow-hidden"
-      >
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-6 py-4 border-b border-border">
           <Clock className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-display font-semibold text-foreground">Ordens Recentes</h2>
@@ -75,17 +83,18 @@ const Dashboard = () => {
             <tbody>
               {recentOrders.map((order) => (
                 <tr key={order.id} className="border-b border-border/50 hover:bg-secondary/50 transition-colors">
-                  <td className="px-6 py-3 font-mono text-primary">{order.id}</td>
-                  <td className="px-6 py-3 text-foreground">{order.client}</td>
-                  <td className="px-6 py-3 text-foreground">{order.tech}</td>
-                  <td className="px-6 py-3 text-muted-foreground">{order.date}</td>
+                  <td className="px-6 py-3 font-mono text-primary">{order.numero}</td>
+                  <td className="px-6 py-3 text-foreground">{order.clients?.nome || "-"}</td>
+                  <td className="px-6 py-3 text-foreground">{order.technicians?.nome || "-"}</td>
+                  <td className="px-6 py-3 text-muted-foreground">{new Date(order.created_at).toLocaleDateString("pt-PT")}</td>
                   <td className="px-6 py-3">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColor[order.status]}`}>
-                      {order.status}
-                    </span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColor[order.status] || "bg-secondary text-foreground"}`}>{order.status}</span>
                   </td>
                 </tr>
               ))}
+              {recentOrders.length === 0 && (
+                <tr><td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">Nenhuma ordem registada</td></tr>
+              )}
             </tbody>
           </table>
         </div>

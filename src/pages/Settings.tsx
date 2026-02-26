@@ -1,32 +1,56 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Building2, Save, UserPlus, X } from "lucide-react";
+import { Building2, Save, UserPlus, X, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import logo from "@/assets/logo.png";
+import { toast } from "sonner";
 
 const Settings = () => {
-  const { user } = useAuth();
-  const [company, setCompany] = useState({
-    nome: "GPSXPRESS",
-    nif: "123456789",
-    endereco: "Rua da Tecnologia, 100",
-    cidade: "Lisboa",
-    telefone: "+351 210 000 000",
-    email: "info@gpsxpress.com",
-  });
-
-  const [users, setUsers] = useState([
-    { id: "1", name: "Administrador", email: "admin@gpsxpress.com", role: "admin" },
-  ]);
-
-  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "user" });
+  const { isAdmin } = useAuth();
+  const [company, setCompany] = useState({ id: "", nome: "", nif: "", endereco: "", cidade: "", telefone: "", email: "" });
+  const [users, setUsers] = useState<any[]>([]);
   const [showNewUser, setShowNewUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name: "", email: "", password: "" });
+  const [saving, setSaving] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
 
-  const addUser = () => {
-    if (!newUser.name || !newUser.email) return;
-    setUsers([...users, { ...newUser, id: Date.now().toString() }]);
-    setNewUser({ name: "", email: "", password: "", role: "user" });
-    setShowNewUser(false);
+  useEffect(() => {
+    const fetchCompany = async () => {
+      const { data } = await supabase.from("company_settings").select("*").limit(1).single();
+      if (data) setCompany({ id: data.id, nome: data.nome, nif: data.nif || "", endereco: data.endereco || "", cidade: data.cidade || "", telefone: data.telefone || "", email: data.email || "" });
+    };
+    const fetchUsers = async () => {
+      const { data } = await supabase.from("profiles").select("*, user_roles(role)");
+      setUsers(data || []);
+    };
+    fetchCompany();
+    fetchUsers();
+  }, []);
+
+  const saveCompany = async () => {
+    setSaving(true);
+    const { id, ...rest } = company;
+    const { error } = await supabase.from("company_settings").update(rest).eq("id", id);
+    if (error) toast.error(error.message); else toast.success("Dados salvos");
+    setSaving(false);
+  };
+
+  const createUser = async () => {
+    if (!newUser.name || !newUser.email || !newUser.password) return;
+    setCreatingUser(true);
+    const { error } = await supabase.auth.signUp({
+      email: newUser.email,
+      password: newUser.password,
+      options: { data: { display_name: newUser.name } },
+    });
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Usuário criado! Verifique o e-mail para confirmar.");
+      setNewUser({ name: "", email: "", password: "" });
+      setShowNewUser(false);
+    }
+    setCreatingUser(false);
   };
 
   return (
@@ -36,7 +60,6 @@ const Settings = () => {
         <p className="text-sm text-muted-foreground mt-1">Dados da empresa e gestão de usuários</p>
       </div>
 
-      {/* Company Info */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-6 space-y-5">
         <div className="flex items-center gap-3">
           <Building2 className="h-5 w-5 text-primary" />
@@ -52,7 +75,7 @@ const Settings = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {(Object.keys(company) as Array<keyof typeof company>).map((field) => (
+          {(["nome", "nif", "endereco", "cidade", "telefone", "email"] as const).map((field) => (
             <div key={field}>
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 {field === "nif" ? "NIF" : field === "endereco" ? "Endereço" : field.charAt(0).toUpperCase() + field.slice(1)}
@@ -60,19 +83,21 @@ const Settings = () => {
               <input
                 value={company[field]}
                 onChange={(e) => setCompany({ ...company, [field]: e.target.value })}
-                className="w-full mt-1 px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                disabled={!isAdmin}
+                className="w-full mt-1 px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
               />
             </div>
           ))}
         </div>
 
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all">
-          <Save className="h-4 w-4" /> Salvar
-        </button>
+        {isAdmin && (
+          <button onClick={saveCompany} disabled={saving} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all disabled:opacity-50">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar
+          </button>
+        )}
       </motion.div>
 
-      {/* Users */}
-      {user?.role === "admin" && (
+      {isAdmin && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass rounded-xl p-6 space-y-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -88,11 +113,11 @@ const Settings = () => {
             {users.map((u) => (
               <div key={u.id} className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
                 <div>
-                  <p className="text-sm font-medium text-foreground">{u.name}</p>
+                  <p className="text-sm font-medium text-foreground">{u.display_name || "Sem nome"}</p>
                   <p className="text-xs text-muted-foreground">{u.email}</p>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.role === "admin" ? "bg-accent/20 text-accent" : "bg-primary/15 text-primary"}`}>
-                  {u.role === "admin" ? "Admin" : "Usuário"}
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.user_roles?.some((r: any) => r.role === "admin") ? "bg-accent/20 text-accent" : "bg-primary/15 text-primary"}`}>
+                  {u.user_roles?.some((r: any) => r.role === "admin") ? "Admin" : "Usuário"}
                 </span>
               </div>
             ))}
@@ -109,15 +134,12 @@ const Settings = () => {
                   className="px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
                 <input value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} placeholder="E-mail"
                   className="px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-                <input type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} placeholder="Senha"
-                  className="px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
-                <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                  className="px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
-                  <option value="user">Usuário</option>
-                  <option value="admin">Administrador</option>
-                </select>
+                <input type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} placeholder="Senha (min. 6 caracteres)"
+                  className="px-3 py-2 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 sm:col-span-2" />
               </div>
-              <button onClick={addUser} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all">Criar Usuário</button>
+              <button onClick={createUser} disabled={creatingUser} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-50">
+                {creatingUser && <Loader2 className="h-4 w-4 animate-spin" />} Criar Usuário
+              </button>
             </div>
           )}
         </motion.div>
