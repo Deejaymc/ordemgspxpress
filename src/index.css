@@ -34,7 +34,7 @@
     --input: 220 14% 22%;
     --ring: 207 90% 54%;
 
-    --radius: 0.75rem;
+    --radius: 1.25rem;
 
     --sidebar-background: 220 20% 8%;
     --sidebar-foreground: 210 20% 85%;
@@ -55,6 +55,9 @@
 
     --font-display: 'Orbitron', sans-serif;
     --font-body: 'Inter', sans-serif;
+  }
+  .dark {
+    --radius: 1.25rem;
   }
 }
 
