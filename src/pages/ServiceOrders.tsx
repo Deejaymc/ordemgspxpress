@@ -1,23 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Plus, Search, Eye, Trash2, X, FileDown } from "lucide-react";
+import { Plus, Search, Trash2, X, FileDown, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
-interface ServiceOrder {
-  id: string;
-  numero: string;
-  clienteNome: string;
-  tecnicoNome: string;
-  data: string;
-  status: "Pendente" | "Em andamento" | "Concluída";
-  descricao: string;
-  produtos: string[];
-}
-
-const initialOrders: ServiceOrder[] = [
-  { id: "1", numero: "OS-001", clienteNome: "João Silva", tecnicoNome: "Carlos Mendes", data: "2026-02-25", status: "Em andamento", descricao: "Instalação de rastreador GPS no veículo", produtos: ["Rastreador GPS V4"] },
-  { id: "2", numero: "OS-002", clienteNome: "Maria Santos", tecnicoNome: "Ana Costa", data: "2026-02-24", status: "Concluída", descricao: "Manutenção preventiva do sistema GPS", produtos: ["Sensor de Temperatura"] },
-  { id: "3", numero: "OS-003", clienteNome: "Pedro Oliveira", tecnicoNome: "Bruno Lima", data: "2026-02-24", status: "Pendente", descricao: "Configuração de alarme e cerca virtual", produtos: ["Rastreador GPS V4", "Sensor de Temperatura"] },
-];
+type Client = Tables<"clients">;
+type Technician = Tables<"technicians">;
 
 const statusColor: Record<string, string> = {
   "Pendente": "bg-warning/20 text-warning",
@@ -26,35 +16,63 @@ const statusColor: Record<string, string> = {
 };
 
 const ServiceOrders = () => {
-  const [orders, setOrders] = useState<ServiceOrder[]>(initialOrders);
+  const { isAdmin, user } = useAuth();
+  const [orders, setOrders] = useState<any[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const [viewing, setViewing] = useState<ServiceOrder | null>(null);
-  const [form, setForm] = useState({ clienteNome: "", tecnicoNome: "", descricao: "", status: "Pendente" as const });
+  const [form, setForm] = useState({ client_id: "", technician_id: "", descricao: "", status: "Pendente" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const filtered = orders.filter((o) =>
-    [o.numero, o.clienteNome, o.tecnicoNome].some((v) => v.toLowerCase().includes(search.toLowerCase()))
-  );
-
-  const openNew = () => { setViewing(null); setForm({ clienteNome: "", tecnicoNome: "", descricao: "", status: "Pendente" }); setModalOpen(true); };
-
-  const save = () => {
-    if (!form.clienteNome) return;
-    const newOrder: ServiceOrder = {
-      id: Date.now().toString(),
-      numero: `OS-${String(orders.length + 1).padStart(3, "0")}`,
-      ...form,
-      data: new Date().toISOString().split("T")[0],
-      produtos: [],
-    };
-    setOrders([newOrder, ...orders]);
-    setModalOpen(false);
+  const fetchAll = async () => {
+    setLoading(true);
+    const [ordersRes, clientsRes, techsRes] = await Promise.all([
+      supabase.from("service_orders").select("*, clients(nome, nif, endereco, cidade, telefone, email), technicians(nome)").order("created_at", { ascending: false }),
+      supabase.from("clients").select("*").order("nome"),
+      supabase.from("technicians").select("*").order("nome"),
+    ]);
+    setOrders(ordersRes.data || []);
+    setClients(clientsRes.data || []);
+    setTechnicians(techsRes.data || []);
+    setLoading(false);
   };
 
-  const remove = (id: string) => setOrders(orders.filter((o) => o.id !== id));
+  useEffect(() => { fetchAll(); }, []);
 
-  const exportPDF = (order: ServiceOrder) => {
-    // Simple print-based PDF generation
+  const filtered = orders.filter((o) =>
+    [o.numero, o.clients?.nome, o.technicians?.nome].some((v) => (v || "").toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const openNew = () => { setForm({ client_id: "", technician_id: "", descricao: "", status: "Pendente" }); setModalOpen(true); };
+
+  const save = async () => {
+    if (!form.client_id) return;
+    setSaving(true);
+    const count = orders.length + 1;
+    const numero = `OS-${String(count).padStart(3, "0")}`;
+    const { error } = await supabase.from("service_orders").insert({
+      numero,
+      client_id: form.client_id,
+      technician_id: form.technician_id || null,
+      descricao: form.descricao,
+      status: form.status,
+      created_by: user?.id,
+    });
+    if (error) toast.error(error.message); else toast.success("OS criada");
+    setSaving(false);
+    setModalOpen(false);
+    fetchAll();
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from("service_orders").delete().eq("id", id);
+    if (error) toast.error(error.message); else { toast.success("OS removida"); fetchAll(); }
+  };
+
+  const exportPDF = async (order: any) => {
+    const { data: company } = await supabase.from("company_settings").select("*").limit(1).single();
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`
@@ -67,11 +85,7 @@ const ServiceOrders = () => {
         .info { margin-bottom: 20px; }
         .info h3 { color: #2196F3; margin-bottom: 8px; }
         .info p { margin: 4px 0; font-size: 14px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 14px; }
-        th { background: #2196F3; color: white; }
         .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #ddd; padding-top: 15px; }
-        .status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
         @media print { body { padding: 20px; } }
       </style></head><body>
       <div class="header">
@@ -79,45 +93,41 @@ const ServiceOrders = () => {
         <div style="text-align: right;">
           <h2 style="margin: 0; color: #2196F3;">ORDEM DE SERVIÇO</h2>
           <p style="margin: 4px 0; font-size: 18px; font-weight: bold;">${order.numero}</p>
-          <p style="margin: 4px 0; font-size: 14px;">Data: ${order.data}</p>
+          <p style="margin: 4px 0; font-size: 14px;">Data: ${new Date(order.created_at).toLocaleDateString("pt-PT")}</p>
         </div>
       </div>
       <div class="info">
         <h3>Dados da Empresa</h3>
-        <p><strong>GPSXPRESS</strong></p>
-        <p>NIF: 123456789 | Tel: +351 210 000 000</p>
-        <p>Rua da Tecnologia, 100 - Lisboa, Portugal</p>
-        <p>Email: info@gpsxpress.com</p>
+        <p><strong>${company?.nome || "GPSXPRESS"}</strong></p>
+        <p>NIF: ${company?.nif || ""} | Tel: ${company?.telefone || ""}</p>
+        <p>${company?.endereco || ""} - ${company?.cidade || ""}</p>
+        <p>Email: ${company?.email || ""}</p>
       </div>
       <div class="info">
         <h3>Dados do Cliente</h3>
-        <p><strong>${order.clienteNome}</strong></p>
+        <p><strong>${order.clients?.nome || ""}</strong></p>
+        <p>NIF: ${order.clients?.nif || ""} | Tel: ${order.clients?.telefone || ""}</p>
+        <p>${order.clients?.endereco || ""} - ${order.clients?.cidade || ""}</p>
+        <p>Email: ${order.clients?.email || ""}</p>
       </div>
       <div class="info">
         <h3>Detalhes do Serviço</h3>
-        <p><strong>Técnico:</strong> ${order.tecnicoNome}</p>
+        <p><strong>Técnico:</strong> ${order.technicians?.nome || "-"}</p>
         <p><strong>Status:</strong> ${order.status}</p>
-        <p><strong>Descrição:</strong> ${order.descricao}</p>
+        <p><strong>Descrição:</strong> ${order.descricao || "-"}</p>
       </div>
-      ${order.produtos.length > 0 ? `
-      <table>
-        <thead><tr><th>Produto/Equipamento</th><th>Qtd</th></tr></thead>
-        <tbody>${order.produtos.map(p => `<tr><td>${p}</td><td>1</td></tr>`).join("")}</tbody>
-      </table>` : ""}
       <div style="margin-top: 60px; display: flex; justify-content: space-between;">
-        <div style="text-align: center; width: 200px;">
-          <div style="border-top: 1px solid #333; padding-top: 8px; font-size: 13px;">Assinatura do Cliente</div>
-        </div>
-        <div style="text-align: center; width: 200px;">
-          <div style="border-top: 1px solid #333; padding-top: 8px; font-size: 13px;">Assinatura do Técnico</div>
-        </div>
+        <div style="text-align: center; width: 200px;"><div style="border-top: 1px solid #333; padding-top: 8px; font-size: 13px;">Assinatura do Cliente</div></div>
+        <div style="text-align: center; width: 200px;"><div style="border-top: 1px solid #333; padding-top: 8px; font-size: 13px;">Assinatura do Técnico</div></div>
       </div>
-      <div class="footer">GPSXPRESS - Sistema de Ordens de Serviço</div>
+      <div class="footer">${company?.nome || "GPSXPRESS"} - Sistema de Ordens de Serviço</div>
       </body></html>
     `);
     w.document.close();
     w.print();
   };
+
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
 
   return (
     <div className="space-y-6">
@@ -154,13 +164,13 @@ const ServiceOrders = () => {
               {filtered.map((o) => (
                 <tr key={o.id} className="border-b border-border/50 hover:bg-secondary/50 transition-colors">
                   <td className="px-6 py-3 font-mono text-primary">{o.numero}</td>
-                  <td className="px-6 py-3 text-foreground">{o.clienteNome}</td>
-                  <td className="px-6 py-3 text-muted-foreground hidden md:table-cell">{o.tecnicoNome}</td>
-                  <td className="px-6 py-3 text-muted-foreground hidden sm:table-cell">{o.data}</td>
-                  <td className="px-6 py-3"><span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColor[o.status]}`}>{o.status}</span></td>
+                  <td className="px-6 py-3 text-foreground">{o.clients?.nome || "-"}</td>
+                  <td className="px-6 py-3 text-muted-foreground hidden md:table-cell">{o.technicians?.nome || "-"}</td>
+                  <td className="px-6 py-3 text-muted-foreground hidden sm:table-cell">{new Date(o.created_at).toLocaleDateString("pt-PT")}</td>
+                  <td className="px-6 py-3"><span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColor[o.status] || "bg-secondary text-foreground"}`}>{o.status}</span></td>
                   <td className="px-6 py-3 text-right space-x-1">
                     <button onClick={() => exportPDF(o)} className="p-1.5 rounded-md hover:bg-success/10 text-success transition-colors" title="Exportar PDF"><FileDown className="h-4 w-4" /></button>
-                    <button onClick={() => remove(o.id)} className="p-1.5 rounded-md hover:bg-accent/10 text-accent transition-colors"><Trash2 className="h-4 w-4" /></button>
+                    {isAdmin && <button onClick={() => remove(o.id)} className="p-1.5 rounded-md hover:bg-accent/10 text-accent transition-colors"><Trash2 className="h-4 w-4" /></button>}
                   </td>
                 </tr>
               ))}
@@ -182,13 +192,19 @@ const ServiceOrders = () => {
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Cliente</label>
-                <input value={form.clienteNome} onChange={(e) => setForm({ ...form, clienteNome: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                <select value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
+                  <option value="">Selecione um cliente</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Técnico</label>
-                <input value={form.tecnicoNome} onChange={(e) => setForm({ ...form, tecnicoNome: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                <select value={form.technician_id} onChange={(e) => setForm({ ...form, technician_id: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg bg-secondary border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
+                  <option value="">Selecione um técnico</option>
+                  {technicians.map((t) => <option key={t.id} value={t.id}>{t.nome}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Descrição</label>
@@ -198,7 +214,9 @@ const ServiceOrders = () => {
             </div>
             <div className="flex justify-end gap-3">
               <button onClick={() => setModalOpen(false)} className="px-4 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground transition-colors">Cancelar</button>
-              <button onClick={save} className="px-5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all">Criar OS</button>
+              <button onClick={save} disabled={saving} className="px-5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-50">
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />} Criar OS
+              </button>
             </div>
           </motion.div>
         </div>
