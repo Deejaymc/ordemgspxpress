@@ -66,6 +66,11 @@ const ServiceOrders = () => {
     fetchAll();
   };
 
+  const updateStatus = async (id: string, status: string) => {
+    const { error } = await supabase.from("service_orders").update({ status }).eq("id", id);
+    if (error) toast.error(error.message); else { toast.success("Status atualizado"); fetchAll(); }
+  };
+
   const remove = async (id: string) => {
     const { error } = await supabase.from("service_orders").delete().eq("id", id);
     if (error) toast.error(error.message); else { toast.success("OS removida"); fetchAll(); }
@@ -167,7 +172,14 @@ const ServiceOrders = () => {
                   <td className="px-6 py-3 text-foreground">{o.clients?.nome || "-"}</td>
                   <td className="px-6 py-3 text-muted-foreground hidden md:table-cell">{o.technicians?.nome || "-"}</td>
                   <td className="px-6 py-3 text-muted-foreground hidden sm:table-cell">{new Date(o.created_at).toLocaleDateString("pt-PT")}</td>
-                  <td className="px-6 py-3"><span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColor[o.status] || "bg-secondary text-foreground"}`}>{o.status}</span></td>
+                  <td className="px-6 py-3">
+                    <select value={o.status} onChange={(e) => updateStatus(o.id, e.target.value)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50 ${statusColor[o.status] || "bg-secondary text-foreground"}`}>
+                      <option value="Pendente">Pendente</option>
+                      <option value="Em andamento">Em andamento</option>
+                      <option value="Concluída">Concluída</option>
+                    </select>
+                  </td>
                   <td className="px-6 py-3 text-right space-x-1">
                     <button onClick={() => exportPDF(o)} className="p-1.5 rounded-md hover:bg-success/10 text-success transition-colors" title="Exportar PDF"><FileDown className="h-4 w-4" /></button>
                     {isAdmin && <button onClick={() => remove(o.id)} className="p-1.5 rounded-md hover:bg-accent/10 text-accent transition-colors"><Trash2 className="h-4 w-4" /></button>}
